@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/fatih/color"
+	ui "github.com/gizak/termui/v3"
 )
 
 type Bill struct {
@@ -21,43 +24,12 @@ var bills []Bill = []Bill{
 }
 
 // Starting balance
-var currentBalance int = 50
-
-// Get paid
-func getPaid(wg *sync.WaitGroup, mx *sync.RWMutex) {
-	defer wg.Done()
-
-	// Don't ask don't tell
-	salary := rand.Intn(10)
-
-	if salary > 0 {
-		color.Green("You made $%d this week :)\n", salary)
-		mx.Lock()
-		currentBalance = currentBalance + salary
-		mx.Unlock()
-	}
-}
-
-// Try to pay all the bills
-func payBills(week int, wg *sync.WaitGroup, mx *sync.RWMutex) {
-	defer wg.Done()
-
-	for _, bill := range bills {
-		if (week % bill.EveryXWeeks) == 0 {
-			color.Magenta("%s is due!\n", bill.Source)
-			mx.Lock()
-			newBalance := currentBalance
-			newBalance = newBalance - bill.Amount
-			currentBalance = newBalance
-			mx.Unlock()
-		}
-	}
-}
+var currentBalance int = 500
 
 // Get the balance
 func startWeek(week int, mx *sync.RWMutex) {
 	mx.RLock()
-	fmt.Printf("It's week %d, time to adult. You have $%d\n", week, currentBalance)
+	ls.Rows = append(ls.Rows, strings.("It's week %d, time to adult. You have $%d\n", week, currentBalance)
 	mx.RUnlock()
 }
 
@@ -65,8 +37,17 @@ func startWeek(week int, mx *sync.RWMutex) {
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
+	// Open UI and ensure close
+	if err := ui.Init(); err != nil {
+		log.Fatalf("failed to initialize termui: %v", err)
+	}
+	defer ui.Close()
+
+	buildUi()
+
 	week := 0
 
+	// When did we fail at life?
 	defer func() {
 		color.Red("You went broke on week %d\n", week)
 	}()
@@ -84,4 +65,6 @@ func main() {
 		go payBills(week, &wg, &mx)
 		wg.Wait()
 	}
+
+	time.Sleep(5 * time.Second)
 }
