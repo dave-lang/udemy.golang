@@ -1,142 +1,155 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"time"
 
-	ui "github.com/gizak/termui/v3"
-	"github.com/gizak/termui/v3/widgets"
+	"github.com/mum4k/termdash"
+	"github.com/mum4k/termdash/cell"
+	"github.com/mum4k/termdash/container"
+	"github.com/mum4k/termdash/container/grid"
+	"github.com/mum4k/termdash/linestyle"
+	"github.com/mum4k/termdash/terminal/tcell"
+	"github.com/mum4k/termdash/terminal/terminalapi"
+	"github.com/mum4k/termdash/widgets/linechart"
+	"github.com/mum4k/termdash/widgets/text"
 )
 
-var balancePlot *widgets.Plot
-var ls *widgets.List
-var lsLedger *widgets.List
-var grid *ui.Grid
+var balanceChart *linechart.LineChart
+var balanceHistory []float64
+
+var lsWeekly *text.Text
+var lsBalance *text.Text
+
+//var lsLedger *widgets.List
+
+func createBalanceChart(initialBalance float64) {
+	lc, err := linechart.New(
+		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
+		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+		linechart.XLabelCellOpts(cell.FgColor(cell.ColorCyan)),
+		linechart.YAxisCustomScale(0, 550),
+		linechart.YAxisFormattedValues(linechart.ValueFormatterRound),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	balanceHistory = []float64{initialBalance}
+
+	if err := lc.Series("first", balanceHistory); err != nil {
+		panic(err)
+	}
+
+	balanceChart = lc
+}
+
+func createWeeklyLedger() {
+	text, err := text.New(text.RollContent())
+	if err != nil {
+		panic(err)
+	}
+
+	lsWeekly = text
+}
+
+func createBalanceLedger() {
+	text, err := text.New(text.RollContent())
+	if err != nil {
+		panic(err)
+	}
+
+	lsBalance = text
+}
 
 func buildUi(initialBalance int) {
-	balancePlot = widgets.NewPlot()
+	// Balance chart
+	createBalanceChart(float64(initialBalance))
+	createWeeklyLedger()
+	createBalanceLedger()
+}
 
-	var labels []string
-	for i := 1; i < 900; i++ {
-		labels = append(labels, fmt.Sprint(i))
+func runUi() {
+	const redrawInterval = 250 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+
+	t, err := tcell.New()
+	if err != nil {
+		panic(err)
 	}
+	defer t.Close()
 
-	balancePlot.Marker = widgets.MarkerDot
-	balancePlot.Title = "Balance (40 weeks)"
-	balancePlot.Data = make([][]float64, 1)
-	balancePlot.Data[0] = []float64{float64(initialBalance), float64(initialBalance)} // Needs 2 val to initialise
-	balancePlot.SetRect(0, 0, 10, 10)
-	balancePlot.DataLabels = labels
-	balancePlot.Inner.Max.X = 30
-	balancePlot.HorizontalScale = 1
-	balancePlot.AxesColor = ui.ColorYellow
-	balancePlot.LineColors[0] = ui.ColorGreen
+	builder := grid.New()
 
-	// Shows weekly balance
-	ls = widgets.NewList()
-	ls.Title = "Weekly balance (Up, down to scroll)"
-	ls.Rows = []string{
-		"Starting the week",
-	}
-	ls.Border = true
-
-	// Shows bills and income
-	lsLedger = widgets.NewList()
-	lsLedger.Title = "Income and Bills (o, p to scroll)"
-	lsLedger.Rows = []string{
-		"Waiting for bills",
-	}
-	//lsLedger.Border = true
-
-	grid = ui.NewGrid()
-	termWidth, termHeight := ui.TerminalDimensions()
-	grid.SetRect(0, 0, termWidth, termHeight)
-
-	grid.Set(
-		ui.NewRow(2.0/3, // 2/3 Height
-			ui.NewCol(1.0/2, balancePlot), // 1/2 Width
-			ui.NewCol(1.0/2, lsLedger),
-		),
-		ui.NewRow(1.0/3,
-			ui.NewCol(1.0, ls),
+	builder.Add(
+		grid.RowHeightPerc(50,
+			grid.Widget(balanceChart, container.Border(linestyle.Light), container.BorderTitle("PRESS Q TO QUIT")),
 		),
 	)
 
-	ui.Render(grid)
+	builder.Add(
+		grid.ColWidthPerc(50,
+			grid.Widget(lsBalance,
+				container.Border(linestyle.Light), container.BorderTitle("Weekly balances"),
+			),
+		),
+		grid.ColWidthPerc(50,
+			grid.Widget(lsWeekly,
+				container.Border(linestyle.Light), container.BorderTitle("Weekly credit/debits"),
+			),
+		),
+	)
+
+	gridOpts, err := builder.Build()
+	if err != nil {
+		fmt.Errorf("builder.Build => %v", err)
+	}
+
+	c, err := container.New(t, gridOpts...)
+	if err != nil {
+		fmt.Errorf("container.New => %v", err)
+	}
+
+	quitter := func(k *terminalapi.Keyboard) {
+		if k.Key == 'q' || k.Key == 'Q' {
+			cancel()
+		}
+	}
+
+	if err := termdash.Run(ctx, t, c, termdash.KeyboardSubscriber(quitter), termdash.RedrawInterval(redrawInterval)); err != nil {
+		panic(err)
+	}
 }
 
 func updateBalance(balance float64) {
-	balancePlot.Data[0] = append(balancePlot.Data[0], balance)
+	balanceHistory = append(balanceHistory, balance)
 
-	// Limit to 40 weeks by slicing off first elemnt
-	if len(balancePlot.Data[0]) > 40 {
-		balancePlot.Data[0] = balancePlot.Data[0][1:]
+	if err := balanceChart.Series("first", balanceHistory,
+		linechart.SeriesCellOpts(cell.FgColor(cell.ColorNumber(33))),
+		linechart.SeriesXLabels(map[int]string{
+			0: "0",
+		}),
+	); err != nil {
+		panic(err)
 	}
 
-	ui.Render(balancePlot)
+	// // Limit to 40 weeks by slicing off first elemnt
+	// if len(balancePlot.Data[0]) > 40 {
+	// 	balancePlot.Data[0] = balancePlot.Data[0][1:]
+	// }
+
+	// ui.Render(balancePlot)
 }
 
 func updateLedger(str string) {
-	lsLedger.Rows = append(lsLedger.Rows, str)
-	//lsLedger.ScrollBottom()
-	ui.Render(lsLedger)
+	if err := lsBalance.Write(fmt.Sprintf("%s\n", str)); err != nil {
+		panic(err)
+	}
 }
 
-func updateLog(str string) {
-	ls.Rows = append(ls.Rows, str)
-	ls.ScrollBottom()
-	ui.Render(ls)
-}
-
-func handleInput() {
-	previousKey := ""
-	uiEvents := ui.PollEvents()
-	//ticker := time.NewTicker(time.Second).C // Handle consistent updates
-
-	for {
-		select {
-		case e := <-uiEvents:
-			switch e.ID {
-			case "q", "<C-c>":
-				return
-			case "j", "<Down>":
-				ls.ScrollDown()
-				//lsLedger.ScrollDown()
-			case "k", "<Up>":
-				ls.ScrollUp()
-				lsLedger.ScrollUp()
-			case "<C-d>":
-				ls.ScrollHalfPageDown()
-			case "<C-u>":
-				ls.ScrollHalfPageUp()
-			case "<C-f>":
-				ls.ScrollPageDown()
-			case "<C-b>":
-				ls.ScrollPageUp()
-			case "g":
-				if previousKey == "g" {
-					ls.ScrollTop()
-				}
-			case "o":
-				lsLedger.ScrollUp()
-			case "p":
-				lsLedger.ScrollDown()
-			case "<Home>":
-				ls.ScrollTop()
-			case "G", "<End>":
-				ls.ScrollBottom()
-			}
-
-			if previousKey == "g" {
-				previousKey = ""
-			} else {
-				previousKey = e.ID
-			}
-
-			ui.Render(grid)
-			//case <-ticker:
-			//ui.Render(ls)
-			//ui.Render(lsLedger)
-			//ui.Render(balancePlot)
-		}
+func updateWeekly(str string) {
+	if err := lsWeekly.Write(fmt.Sprintf("%s\n", str)); err != nil {
+		panic(err)
 	}
 }

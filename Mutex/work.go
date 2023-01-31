@@ -16,7 +16,7 @@ func getPaid(wg *sync.WaitGroup, mx *sync.RWMutex) {
 
 	if salary > 0 {
 		//color.Green("You made $%d this week :)\n", salary)
-		updateLedger(fmt.Sprint("You made $", salary, " this week :)"))
+		updateWeekly(fmt.Sprint("You made $", salary, " this week :)"))
 
 		mx.Lock()
 		currentBalance = currentBalance + salary
@@ -31,7 +31,7 @@ func payBills(week int, wg *sync.WaitGroup, mx *sync.RWMutex) {
 	for _, bill := range bills {
 		if (week % bill.EveryXWeeks) == 0 {
 			//color.Magenta("%s is due!\n", bill.Source)
-			updateLedger(fmt.Sprint(bill.Source, " is due!"))
+			updateWeekly(fmt.Sprint(bill.Source, " is due!"))
 
 			mx.Lock()
 			newBalance := currentBalance
