@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/fatih/color"
 	ui "github.com/gizak/termui/v3"
 )
 
@@ -29,7 +27,8 @@ var currentBalance int = 500
 // Get the balance
 func startWeek(week int, mx *sync.RWMutex) {
 	mx.RLock()
-	ls.Rows = append(ls.Rows, strings.("It's week %d, time to adult. You have $%d\n", week, currentBalance)
+	updateLog(fmt.Sprint("It's week ", week, " time to adult. You have $", currentBalance))
+	updateBalance(float64(currentBalance))
 	mx.RUnlock()
 }
 
@@ -43,13 +42,21 @@ func main() {
 	}
 	defer ui.Close()
 
-	buildUi()
+	buildUi(currentBalance)
 
+	go simulate()
+
+	handleInput()
+}
+
+// Actually does money
+func simulate() {
 	week := 0
 
 	// When did we fail at life?
 	defer func() {
-		color.Red("You went broke on week %d\n", week)
+		//color.Red("You went broke on week %d\n", week)
+		updateLog(fmt.Sprint("You went broke on week", week))
 	}()
 
 	var wg sync.WaitGroup
@@ -64,7 +71,7 @@ func main() {
 		go getPaid(&wg, &mx)
 		go payBills(week, &wg, &mx)
 		wg.Wait()
-	}
 
-	time.Sleep(5 * time.Second)
+		time.Sleep(time.Duration(1 * time.Second))
+	}
 }
